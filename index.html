@@ -293,19 +293,48 @@ async function loadDocuments() {
   try {
     const response = await apiCall('/objects?limit=100&offset=0');
     
-    if (!response.objects || response.objects.length === 0) {
-      docList.innerHTML = '<p style="color: #999;">No documents found</p>';
-      log('No documents found in library', 'info');
+    // Log the EXACT structure we got back
+    log('Checking response structure...', 'info');
+    log(`Response keys: ${Object.keys(response).join(', ')}`, 'info');
+    
+    // Try different possible structures
+    let docArray = null;
+    
+    if (response.objects) {
+      docArray = response.objects;
+      log('Found documents in response.objects', 'info');
+    } else if (response.data) {
+      docArray = response.data;
+      log('Found documents in response.data', 'info');
+    } else if (Array.isArray(response)) {
+      docArray = response;
+      log('Response itself is an array', 'info');
+    } else if (response.items) {
+      docArray = response.items;
+      log('Found documents in response.items', 'info');
+    } else {
+      log('Unknown response structure - dumping full response', 'error');
+      logJSON('Full response', response);
+      docList.innerHTML = '<p style="color: #dc3545;">Unknown response format - check console</p>';
       return;
     }
     
-    documents = response.objects;
+    if (!docArray || docArray.length === 0) {
+      docList.innerHTML = '<p style="color: #999;">No documents found</p>';
+      log('Document array is empty', 'info');
+      return;
+    }
+    
+    documents = docArray;
     log(`Loaded ${documents.length} documents`, 'success');
+    
+    // Log first document structure
+    logJSON('First document structure', documents[0]);
     
     // Render document list
     docList.innerHTML = documents.map(doc => `
       <div class="doc-item" onclick="selectDocument('${doc.id}')">
-        <div class="doc-name">${doc.name || 'Untitled'}</div>
+        <div class="doc-name">${doc.name || doc.title || 'Untitled'}</div>
         <div class="doc-id">${doc.id}</div>
       </div>
     `).join('');
