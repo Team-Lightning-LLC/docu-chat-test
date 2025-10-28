@@ -125,6 +125,7 @@
   .log-type-success { color: #81c784; }
   .log-type-error { color: #e57373; }
   .log-type-api { color: #ffb74d; }
+  .log-type-stream { color: #ba68c8; }
   .spinner {
     display: inline-block;
     width: 16px;
@@ -150,6 +151,20 @@
     border-radius: 4px;
     border-left: 4px solid #dc3545;
     color: #721c24;
+  }
+  .stream-section {
+    padding: 15px;
+    background: #f0f4ff;
+    border-radius: 4px;
+    border-left: 4px solid #007bff;
+  }
+  .stream-message {
+    padding: 8px;
+    margin-bottom: 8px;
+    background: white;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.5;
   }
 </style>
 </head>
@@ -212,8 +227,8 @@
 // ============================================================================
 const CONFIG = {
   VERTESIA_API_BASE: 'https://api.vertesia.io/api/v1',
-  VERTESIA_API_KEY: 'sk-2538a58567e4ebb6654c0a17ceab228c', // REPLACE THIS
-  ENVIRONMENT_ID: '681915c6a01fb262a410c161' // REPLACE THIS
+  VERTESIA_API_KEY: 'sk-2538a58567e4ebb6654c0a17ceab228c',
+  ENVIRONMENT_ID: '681915c6a01fb262a410c161'
 };
 
 // ============================================================================
@@ -237,7 +252,6 @@ function log(message, type = 'info') {
   logDiv.appendChild(entry);
   logDiv.scrollTop = logDiv.scrollHeight;
   
-  // Also log to browser console
   console.log(`[${type.toUpperCase()}]`, message);
 }
 
@@ -282,6 +296,114 @@ async function apiCall(endpoint, options = {}) {
 }
 
 // ============================================================================
+// STREAMING
+// ============================================================================
+async function streamWorkflow(workflowId, runId) {
+  const since = Date.now() - 1000; // Start from 1 second ago
+  const url = `${CONFIG.VERTESIA_API_BASE}/workflows/runs/${workflowId}/${runId}/stream?since=${since}&access_token=${CONFIG.VERTESIA_API_KEY}`;
+  
+  log(`Starting stream: ${url}`, 'stream');
+  
+  // Create streaming response area
+  const responseArea = document.getElementById('responseArea');
+  responseArea.innerHTML = `
+    <div class="stream-section">
+      <h3 style="margin-bottom: 10px;">
+        <span class="spinner"></span> Streaming Response...
+      </h3>
+      <div id="streamMessages"></div>
+    </div>
+  `;
+  
+  const streamMessages = document.getElementById('streamMessages');
+  
+  try {
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      throw new Error(`Stream failed: ${response.status} ${response.statusText}`);
+    }
+    
+    log('Stream connected successfully', 'success');
+    
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let messageCount = 0;
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        log('Stream ended', 'stream');
+        responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages)`;
+        break;
+      }
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // Keep incomplete line in buffer
+      
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        
+        try {
+          const data = JSON.parse(line);
+          messageCount++;
+          
+          log(`Stream message #${messageCount}`, 'stream');
+          logJSON(`Message #${messageCount} data`, data);
+          
+          // Display the message
+          const msgDiv = document.createElement('div');
+          msgDiv.className = 'stream-message';
+          
+          // Try to extract meaningful content
+          let content = '';
+          if (data.content) {
+            content = typeof data.content === 'string' ? data.content : JSON.stringify(data.content, null, 2);
+          } else if (data.text) {
+            content = data.text;
+          } else if (data.message) {
+            content = data.message;
+          } else {
+            content = JSON.stringify(data, null, 2);
+          }
+          
+          msgDiv.innerHTML = `
+            <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Message #${messageCount}</div>
+            <pre style="white-space: pre-wrap; font-size: 12px; margin: 0;">${content}</pre>
+          `;
+          
+          streamMessages.appendChild(msgDiv);
+          streamMessages.scrollTop = streamMessages.scrollHeight;
+          
+          // Check for completion
+          if (data.type === 'complete' || data.status === 'completed') {
+            log('Completion signal received', 'success');
+            responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages)`;
+            break;
+          }
+          
+        } catch (e) {
+          log(`Failed to parse stream line: ${e.message}`, 'error');
+          console.warn('Failed to parse line:', line);
+        }
+      }
+    }
+    
+  } catch (error) {
+    log(`Streaming error: ${error.message}`, 'error');
+    responseArea.innerHTML = `
+      <div class="error-section">
+        <h3 style="margin-bottom: 10px;">Streaming Error</h3>
+        <p>${error.message}</p>
+      </div>
+    `;
+  }
+}
+
+// ============================================================================
 // LOAD DOCUMENTS
 // ============================================================================
 async function loadDocuments() {
@@ -293,11 +415,9 @@ async function loadDocuments() {
   try {
     const response = await apiCall('/objects?limit=100&offset=0');
     
-    // Log the EXACT structure we got back
     log('Checking response structure...', 'info');
     log(`Response keys: ${Object.keys(response).join(', ')}`, 'info');
     
-    // Try different possible structures
     let docArray = null;
     
     if (response.objects) {
@@ -328,10 +448,8 @@ async function loadDocuments() {
     documents = docArray;
     log(`Loaded ${documents.length} documents`, 'success');
     
-    // Log first document structure
     logJSON('First document structure', documents[0]);
     
-    // Render document list
     docList.innerHTML = documents.map(doc => `
       <div class="doc-item" onclick="selectDocument('${doc.id}')">
         <div class="doc-name">${doc.name || doc.title || 'Untitled'}</div>
@@ -355,7 +473,6 @@ function selectDocument(docId) {
   selectedDocument = doc;
   log(`Selected document: ${doc.name} (${doc.id})`, 'info');
   
-  // Update UI
   document.querySelectorAll('.doc-item').forEach(item => {
     item.classList.remove('active');
   });
@@ -366,7 +483,6 @@ function selectDocument(docId) {
     <div class="doc-id">${doc.id}</div>
   `;
   
-  // Enable question input
   document.getElementById('questionInput').disabled = false;
   document.getElementById('sendBtn').disabled = false;
 }
@@ -391,20 +507,16 @@ async function sendQuestion() {
   log(`Sending question: "${question}"`, 'info');
   log(`Document ID: ${selectedDocument.id}`, 'info');
   
-  // Disable UI
   questionInput.disabled = true;
   document.getElementById('sendBtn').disabled = true;
   document.getElementById('sendBtn').innerHTML = '<span class="spinner"></span> Sending...';
   
-  // Clear previous response
   document.getElementById('responseArea').innerHTML = '';
   
   try {
-    // Build the task
     const task = `Document ID: ${selectedDocument.id}\n\nQuestion: ${question}`;
     log(`Task prompt: ${task}`, 'info');
     
-    // Call the API
     const response = await apiCall('/execute/async', {
       method: 'POST',
       body: JSON.stringify({
@@ -423,21 +535,26 @@ async function sendQuestion() {
     log('API call successful!', 'success');
     logJSON('Full response object', response);
     
-    // Display response
-    document.getElementById('responseArea').innerHTML = `
-      <div class="response-section">
-        <h3 style="margin-bottom: 10px;">API Response Received</h3>
-        <pre style="white-space: pre-wrap; font-size: 12px;">${JSON.stringify(response, null, 2)}</pre>
-      </div>
-    `;
+    const runId = response.runId;
+    const workflowId = response.workflowId;
     
-    // Check for runId and workflowId
-    if (response.runId) {
-      log(`Got runId: ${response.runId}`, 'success');
+    if (!runId || !workflowId) {
+      log('Missing runId or workflowId - cannot stream', 'error');
+      document.getElementById('responseArea').innerHTML = `
+        <div class="error-section">
+          <h3 style="margin-bottom: 10px;">Error</h3>
+          <p>Response missing runId or workflowId</p>
+          <pre style="font-size: 12px; margin-top: 10px;">${JSON.stringify(response, null, 2)}</pre>
+        </div>
+      `;
+      return;
     }
-    if (response.workflowId) {
-      log(`Got workflowId: ${response.workflowId}`, 'success');
-    }
+    
+    log(`Got runId: ${runId}`, 'success');
+    log(`Got workflowId: ${workflowId}`, 'success');
+    
+    // Start streaming
+    await streamWorkflow(workflowId, runId);
     
   } catch (error) {
     log(`Failed to send question: ${error.message}`, 'error');
@@ -449,7 +566,6 @@ async function sendQuestion() {
       </div>
     `;
   } finally {
-    // Re-enable UI
     questionInput.disabled = false;
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('sendBtn').textContent = 'Send Question';
