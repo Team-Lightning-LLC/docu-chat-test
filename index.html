@@ -404,14 +404,13 @@ async function sendQuestion() {
     const task = `Document ID: ${selectedDocument.id}\n\nQuestion: ${question}`;
     log(`Task prompt: ${task}`, 'info');
     
-    // Call the API
-    const response = await apiCall('/execute/async', {
+    // Call the CORRECT endpoint - /execute (not /execute/async)
+    const response = await apiCall('/execute', {
       method: 'POST',
       body: JSON.stringify({
-        type: 'interaction',
-        interaction: 'DocumentChat',
+        interaction: 'DocumentChat',  // Name of the interaction
         data: {
-          task: task
+          Task: task
         },
         config: {
           environment: CONFIG.ENVIRONMENT_ID,
@@ -420,27 +419,48 @@ async function sendQuestion() {
       })
     });
     
-    log('API call successful!', 'success');
+    log('Execution successful!', 'success');
     logJSON('Full response object', response);
     
-    // Display response
-    document.getElementById('responseArea').innerHTML = `
-      <div class="response-section">
-        <h3 style="margin-bottom: 10px;">API Response Received</h3>
-        <pre style="white-space: pre-wrap; font-size: 12px;">${JSON.stringify(response, null, 2)}</pre>
-      </div>
-    `;
-    
-    // Check for runId and workflowId
-    if (response.runId) {
-      log(`Got runId: ${response.runId}`, 'success');
-    }
-    if (response.workflowId) {
-      log(`Got workflowId: ${response.workflowId}`, 'success');
+    // The result should be in response.result
+    if (response.result) {
+      log('Found result in response!', 'success');
+      logJSON('Result', response.result);
+      
+      // Display the answer
+      let answer = '';
+      if (typeof response.result === 'string') {
+        answer = response.result;
+      } else if (response.result.answer) {
+        answer = response.result.answer;
+      } else if (response.result.output) {
+        answer = response.result.output;
+      } else {
+        answer = JSON.stringify(response.result, null, 2);
+      }
+      
+      document.getElementById('responseArea').innerHTML = `
+        <div class="response-section">
+          <h3 style="margin-bottom: 10px;">Answer</h3>
+          <p style="white-space: pre-wrap;">${answer}</p>
+        </div>
+        <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 12px;">
+          <strong>Full Response:</strong>
+          <pre style="margin-top: 8px; white-space: pre-wrap;">${JSON.stringify(response, null, 2)}</pre>
+        </div>
+      `;
+    } else {
+      log('No result field in response', 'error');
+      document.getElementById('responseArea').innerHTML = `
+        <div class="response-section">
+          <h3 style="margin-bottom: 10px;">Response (No result field found)</h3>
+          <pre style="white-space: pre-wrap; font-size: 12px;">${JSON.stringify(response, null, 2)}</pre>
+        </div>
+      `;
     }
     
   } catch (error) {
-    log(`Failed to send question: ${error.message}`, 'error');
+    log(`Failed to execute: ${error.message}`, 'error');
     
     document.getElementById('responseArea').innerHTML = `
       <div class="error-section">
