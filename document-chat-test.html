@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Chat Test Playground</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f5f5;
+    padding: 20px;
+  }
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 20px;
+  }
+  .panel {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+    color: #333;
+  }
+  h2 {
+    font-size: 18px;
+    margin-bottom: 15px;
+    color: #666;
+  }
+  .doc-list {
+    max-height: 600px;
+    overflow-y: auto;
+  }
+  .doc-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 2px solid transparent;
+  }
+  .doc-item:hover {
+    background: #e9ecef;
+  }
+  .doc-item.active {
+    border-color: #007bff;
+    background: #e7f3ff;
+  }
+  .doc-name {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .doc-id {
+    font-size: 12px;
+    color: #666;
+    font-family: monospace;
+  }
+  .chat-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .selected-doc {
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 4px;
+  }
+  .input-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  button {
+    padding: 12px 24px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover {
+    background: #0056b3;
+  }
+  button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+  .log-section {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 15px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .log-entry {
+    margin-bottom: 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid #333;
+  }
+  .log-time {
+    color: #888;
+  }
+  .log-type-info { color: #4fc3f7; }
+  .log-type-success { color: #81c784; }
+  .log-type-error { color: #e57373; }
+  .log-type-api { color: #ffb74d; }
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .response-section {
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border-left: 4px solid #28a745;
+  }
+  .error-section {
+    padding: 15px;
+    background: #fff5f5;
+    border-radius: 4px;
+    border-left: 4px solid #dc3545;
+    color: #721c24;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Left: Document List -->
+  <div class="panel">
+    <h1>Documents</h1>
+    <button onclick="loadDocuments()" style="width: 100%; margin-bottom: 15px;">Load Documents</button>
+    <div class="doc-list" id="docList">
+      <p style="color: #999;">Click "Load Documents" to begin</p>
+    </div>
+  </div>
+
+  <!-- Right: Chat Interface -->
+  <div class="panel">
+    <h1>Document Chat Test</h1>
+    
+    <div class="chat-section">
+      <!-- Selected Document -->
+      <div>
+        <h2>Selected Document</h2>
+        <div class="selected-doc" id="selectedDoc">
+          <p style="color: #999;">Select a document from the left</p>
+        </div>
+      </div>
+
+      <!-- Question Input -->
+      <div class="input-section">
+        <h2>Ask Question</h2>
+        <textarea 
+          id="questionInput" 
+          rows="3" 
+          placeholder="Type your question here..."
+          disabled></textarea>
+        <button id="sendBtn" onclick="sendQuestion()" disabled>Send Question</button>
+      </div>
+
+      <!-- Response -->
+      <div id="responseArea"></div>
+
+      <!-- Console Log -->
+      <div>
+        <h2>Console Log</h2>
+        <div class="log-section" id="consoleLog">
+          <div class="log-entry">
+            <span class="log-time">[00:00:00]</span>
+            <span class="log-type-info">READY</span> - Playground initialized
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// CONFIG - PUT YOUR API CREDENTIALS HERE
+// ============================================================================
+const CONFIG = {
+  VERTESIA_API_BASE: 'https://api.vertesia.io/api/v1',
+  VERTESIA_API_KEY: 'YOUR_API_KEY_HERE', // REPLACE THIS
+  ENVIRONMENT_ID: 'YOUR_ENV_ID_HERE' // REPLACE THIS
+};
+
+// ============================================================================
+// STATE
+// ============================================================================
+let selectedDocument = null;
+let documents = [];
+
+// ============================================================================
+// LOGGING
+// ============================================================================
+function log(message, type = 'info') {
+  const logDiv = document.getElementById('consoleLog');
+  const time = new Date().toLocaleTimeString();
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  entry.innerHTML = `
+    <span class="log-time">[${time}]</span>
+    <span class="log-type-${type}">${type.toUpperCase()}</span> - ${message}
+  `;
+  logDiv.appendChild(entry);
+  logDiv.scrollTop = logDiv.scrollHeight;
+  
+  // Also log to browser console
+  console.log(`[${type.toUpperCase()}]`, message);
+}
+
+function logJSON(label, data) {
+  log(`${label}: ${JSON.stringify(data, null, 2)}`, 'api');
+}
+
+// ============================================================================
+// API CALLS
+// ============================================================================
+async function apiCall(endpoint, options = {}) {
+  const url = `${CONFIG.VERTESIA_API_BASE}${endpoint}`;
+  
+  log(`API CALL: ${options.method || 'GET'} ${endpoint}`, 'api');
+  
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${CONFIG.VERTESIA_API_KEY}`,
+        'Content-Type': 'application/json',
+        ...options.headers
+      },
+      ...options
+    });
+
+    log(`API RESPONSE: ${response.status} ${response.statusText}`, 'api');
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      log(`API ERROR BODY: ${errorText}`, 'error');
+      throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    logJSON('API RESPONSE DATA', data);
+    
+    return data;
+  } catch (error) {
+    log(`API CALL FAILED: ${error.message}`, 'error');
+    throw error;
+  }
+}
+
+// ============================================================================
+// LOAD DOCUMENTS
+// ============================================================================
+async function loadDocuments() {
+  log('Loading documents from Vertesia...', 'info');
+  
+  const docList = document.getElementById('docList');
+  docList.innerHTML = '<p style="color: #999;">Loading...</p>';
+  
+  try {
+    const response = await apiCall('/objects?limit=100&offset=0');
+    
+    if (!response.objects || response.objects.length === 0) {
+      docList.innerHTML = '<p style="color: #999;">No documents found</p>';
+      log('No documents found in library', 'info');
+      return;
+    }
+    
+    documents = response.objects;
+    log(`Loaded ${documents.length} documents`, 'success');
+    
+    // Render document list
+    docList.innerHTML = documents.map(doc => `
+      <div class="doc-item" onclick="selectDocument('${doc.id}')">
+        <div class="doc-name">${doc.name || 'Untitled'}</div>
+        <div class="doc-id">${doc.id}</div>
+      </div>
+    `).join('');
+    
+  } catch (error) {
+    docList.innerHTML = '<p style="color: #dc3545;">Failed to load documents</p>';
+    log(`Failed to load documents: ${error.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// SELECT DOCUMENT
+// ============================================================================
+function selectDocument(docId) {
+  const doc = documents.find(d => d.id === docId);
+  if (!doc) return;
+  
+  selectedDocument = doc;
+  log(`Selected document: ${doc.name} (${doc.id})`, 'info');
+  
+  // Update UI
+  document.querySelectorAll('.doc-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  event.target.closest('.doc-item').classList.add('active');
+  
+  document.getElementById('selectedDoc').innerHTML = `
+    <div class="doc-name" style="margin-bottom: 8px;">${doc.name || 'Untitled'}</div>
+    <div class="doc-id">${doc.id}</div>
+  `;
+  
+  // Enable question input
+  document.getElementById('questionInput').disabled = false;
+  document.getElementById('sendBtn').disabled = false;
+}
+
+// ============================================================================
+// SEND QUESTION
+// ============================================================================
+async function sendQuestion() {
+  if (!selectedDocument) {
+    log('No document selected', 'error');
+    return;
+  }
+  
+  const questionInput = document.getElementById('questionInput');
+  const question = questionInput.value.trim();
+  
+  if (!question) {
+    log('No question entered', 'error');
+    return;
+  }
+  
+  log(`Sending question: "${question}"`, 'info');
+  log(`Document ID: ${selectedDocument.id}`, 'info');
+  
+  // Disable UI
+  questionInput.disabled = true;
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('sendBtn').innerHTML = '<span class="spinner"></span> Sending...';
+  
+  // Clear previous response
+  document.getElementById('responseArea').innerHTML = '';
+  
+  try {
+    // Build the task
+    const task = `Document ID: ${selectedDocument.id}\n\nQuestion: ${question}`;
+    log(`Task prompt: ${task}`, 'info');
+    
+    // Call the API
+    const response = await apiCall('/execute/async', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'interaction',
+        interaction: 'DocumentChat',
+        data: {
+          Task: task
+        },
+        config: {
+          environment: CONFIG.ENVIRONMENT_ID,
+          model: 'claude-sonnet-4-5-20250929'
+        }
+      })
+    });
+    
+    log('API call successful!', 'success');
+    logJSON('Full response object', response);
+    
+    // Display response
+    document.getElementById('responseArea').innerHTML = `
+      <div class="response-section">
+        <h3 style="margin-bottom: 10px;">API Response Received</h3>
+        <pre style="white-space: pre-wrap; font-size: 12px;">${JSON.stringify(response, null, 2)}</pre>
+      </div>
+    `;
+    
+    // Check for runId and workflowId
+    if (response.runId) {
+      log(`Got runId: ${response.runId}`, 'success');
+    }
+    if (response.workflowId) {
+      log(`Got workflowId: ${response.workflowId}`, 'success');
+    }
+    
+  } catch (error) {
+    log(`Failed to send question: ${error.message}`, 'error');
+    
+    document.getElementById('responseArea').innerHTML = `
+      <div class="error-section">
+        <h3 style="margin-bottom: 10px;">Error</h3>
+        <p>${error.message}</p>
+      </div>
+    `;
+  } finally {
+    // Re-enable UI
+    questionInput.disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('sendBtn').textContent = 'Send Question';
+  }
+}
+
+// ============================================================================
+// INITIALIZE
+// ============================================================================
+log('Playground loaded. Click "Load Documents" to start.', 'info');
+</script>
+
+</body>
+</html>
