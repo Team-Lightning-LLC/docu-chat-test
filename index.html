@@ -299,12 +299,11 @@ async function apiCall(endpoint, options = {}) {
 // STREAMING
 // ============================================================================
 async function streamWorkflow(workflowId, runId) {
-  const since = Date.now() - 1000; // Start from 1 second ago
+  const since = Date.now() - 1000;
   const url = `${CONFIG.VERTESIA_API_BASE}/workflows/runs/${workflowId}/${runId}/stream?since=${since}&access_token=${CONFIG.VERTESIA_API_KEY}`;
   
   log(`Starting stream: ${url}`, 'stream');
   
-  // Create streaming response area
   const responseArea = document.getElementById('responseArea');
   responseArea.innerHTML = `
     <div class="stream-section">
@@ -330,66 +329,101 @@ async function streamWorkflow(workflowId, runId) {
     const decoder = new TextDecoder();
     let buffer = '';
     let messageCount = 0;
+    let heartbeatCount = 0;
     
     while (true) {
       const { done, value } = await reader.read();
       
       if (done) {
         log('Stream ended', 'stream');
-        responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages)`;
+        responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages received)`;
         break;
       }
       
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop(); // Keep incomplete line in buffer
+      buffer = lines.pop();
       
       for (const line of lines) {
         if (line.trim() === '') continue;
         
-        try {
-          const data = JSON.parse(line);
-          messageCount++;
-          
-          log(`Stream message #${messageCount}`, 'stream');
-          logJSON(`Message #${messageCount} data`, data);
-          
-          // Display the message
-          const msgDiv = document.createElement('div');
-          msgDiv.className = 'stream-message';
-          
-          // Try to extract meaningful content
-          let content = '';
-          if (data.content) {
-            content = typeof data.content === 'string' ? data.content : JSON.stringify(data.content, null, 2);
-          } else if (data.text) {
-            content = data.text;
-          } else if (data.message) {
-            content = data.message;
-          } else {
-            content = JSON.stringify(data, null, 2);
+        // SSE heartbeat
+        if (line === ':') {
+          heartbeatCount++;
+          if (heartbeatCount % 10 === 0) {
+            log(`Still connected (${heartbeatCount} heartbeats, waiting for messages...)`, 'stream');
           }
+          continue;
+        }
+        
+        // SSE retry directive
+        if (line.startsWith('retry:')) {
+          log(`SSE retry directive: ${line}`, 'stream');
+          continue;
+        }
+        
+        // SSE data line - THIS IS WHAT WE WANT
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.substring(6); // Remove "data: " prefix
           
-          msgDiv.innerHTML = `
-            <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Message #${messageCount}</div>
-            <pre style="white-space: pre-wrap; font-size: 12px; margin: 0;">${content}</pre>
-          `;
-          
-          streamMessages.appendChild(msgDiv);
-          streamMessages.scrollTop = streamMessages.scrollHeight;
-          
-          // Check for completion
-          if (data.type === 'complete' || data.status === 'completed') {
-            log('Completion signal received', 'success');
-            responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages)`;
-            break;
+          try {
+            const data = JSON.parse(jsonStr);
+            messageCount++;
+            
+            log(`✓ Stream message #${messageCount} received!`, 'stream');
+            logJSON(`Message #${messageCount} data`, data);
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'stream-message';
+            
+            let content = '';
+            if (data.content) {
+              content = typeof data.content === 'string' ? data.content : JSON.stringify(data.content, null, 2);
+            } else if (data.text) {
+              content = data.text;
+            } else if (data.message) {
+              content = data.message;
+            } else {
+              content = JSON.stringify(data, null, 2);
+            }
+            
+            msgDiv.innerHTML = `
+              <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Message #${messageCount}</div>
+              <pre style="white-space: pre-wrap; font-size: 12px; margin: 0;">${content}</pre>
+            `;
+            
+            streamMessages.appendChild(msgDiv);
+            streamMessages.scrollTop = streamMessages.scrollHeight;
+            
+            if (data.type === 'complete' || data.status === 'completed') {
+              log('Completion signal received', 'success');
+              responseArea.querySelector('h3').innerHTML = `✓ Stream Complete (${messageCount} messages)`;
+              return;
+            }
+            
+          } catch (e) {
+            log(`Failed to parse SSE data: ${e.message}`, 'error');
+            log(`Raw data line: ${jsonStr}`, 'error');
           }
-          
-        } catch (e) {
-          log(`Failed to parse stream line: ${e.message}`, 'error');
-          console.warn('Failed to parse line:', line);
         }
       }
+    }
+    
+    if (messageCount === 0) {
+      log('⚠️ Stream ended but NO MESSAGES received - only heartbeats', 'error');
+      responseArea.innerHTML = `
+        <div class="error-section">
+          <h3 style="margin-bottom: 10px;">No Messages Received</h3>
+          <p>The stream connected successfully but the DocumentChat interaction did not send any messages.</p>
+          <p style="margin-top: 10px;">This usually means:</p>
+          <ul style="margin-left: 20px; margin-top: 5px;">
+            <li>The interaction is running but not configured to output to the stream</li>
+            <li>The interaction failed silently</li>
+            <li>The interaction needs different input format</li>
+          </ul>
+          <p style="margin-top: 10px;">Check the Vertesia UI to see if the run completed and what the output was.</p>
+        </div>
+      `;
     }
     
   } catch (error) {
